@@ -680,6 +680,7 @@ static int binder_update_page_range(struct binder_proc *proc, int allocate,
 		}
 		/* vm_insert_page does not seem to increment the refcount */
 	}
+	preempt_disable();
 	if (mm) {
 		up_write(&mm->mmap_sem);
 		mmput(mm);
@@ -705,6 +706,7 @@ err_alloc_page_failed:
 		;
 	}
 err_no_vma:
+	preempt_disable();
 	if (mm) {
 		up_write(&mm->mmap_sem);
 		mmput(mm);
@@ -2335,7 +2337,7 @@ retry:
 		} break;
 		case BINDER_WORK_TRANSACTION_COMPLETE: {
 			cmd = BR_TRANSACTION_COMPLETE;
-				if (put_user_preempt_disabled(cmd, (uint32_t __user *) ptr))
+			if (put_user_preempt_disabled(cmd, (uint32_t __user *)ptr))
 				return -EFAULT;
 			ptr += sizeof(uint32_t);
 
@@ -2377,14 +2379,14 @@ retry:
 				node->has_weak_ref = 0;
 			}
 			if (cmd != BR_NOOP) {
-					if (put_user_preempt_disabled(cmd, (uint32_t __user *) ptr))
+				if (put_user_preempt_disabled(cmd, (uint32_t __user *)ptr))
 					return -EFAULT;
 				ptr += sizeof(uint32_t);
-					if (put_user_preempt_disabled(node->ptr, (binder_uintptr_t __user *)
+				if (put_user_preempt_disabled(node->ptr,
 					     (binder_uintptr_t __user *)ptr))
 					return -EFAULT;
 				ptr += sizeof(binder_uintptr_t);
-					if (put_user_preempt_disabled(node->cookie, (binder_uintptr_t __user *)
+				if (put_user_preempt_disabled(node->cookie,
 					     (binder_uintptr_t __user *)ptr))
 					return -EFAULT;
 				ptr += sizeof(binder_uintptr_t);
@@ -2428,10 +2430,11 @@ retry:
 				cmd = BR_CLEAR_DEATH_NOTIFICATION_DONE;
 			else
 				cmd = BR_DEAD_BINDER;
-				if (put_user_preempt_disabled(cmd, (uint32_t __user *) ptr))
+			if (put_user_preempt_disabled(cmd, (uint32_t __user *)ptr))
 				return -EFAULT;
 			ptr += sizeof(uint32_t);
-			if (put_user_preempt_disabled(death->cookie, (binder_uintptr_t __user *) ptr))
+			if (put_user_preempt_disabled(death->cookie,
+				     (binder_uintptr_t __user *)ptr))
 				return -EFAULT;
 			ptr += sizeof(binder_uintptr_t);
 			binder_stat_br(proc, thread, cmd);
@@ -2498,7 +2501,7 @@ retry:
 					ALIGN(t->buffer->data_size,
 					    sizeof(void *));
 
-		if (put_user_preempt_disabled(cmd, (uint32_t __user *) ptr))
+		if (put_user_preempt_disabled(cmd, (uint32_t __user *)ptr))
 			return -EFAULT;
 		ptr += sizeof(uint32_t);
 		if (copy_to_user_preempt_disabled(ptr, &tr, sizeof(tr)))
@@ -2543,7 +2546,7 @@ done:
 		binder_debug(BINDER_DEBUG_THREADS,
 			     "%d:%d BR_SPAWN_LOOPER\n",
 			     proc->pid, thread->pid);
-		if (put_user_preempt_disabled(BR_SPAWN_LOOPER, (uint32_t __user *) buffer))
+		if (put_user_preempt_disabled(BR_SPAWN_LOOPER, (uint32_t __user *)buffer))
 			return -EFAULT;
 		binder_stat_br(proc, thread, BR_SPAWN_LOOPER);
 	}
@@ -2865,7 +2868,8 @@ static long binder_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 			ret = -EINVAL;
 			goto err;
 		}
-		if (put_user_preempt_disabled(BINDER_CURRENT_PROTOCOL_VERSION, &ver->protocol_version)) {
+		if (put_user_preempt_disabled(BINDER_CURRENT_PROTOCOL_VERSION,
+			     &ver->protocol_version)) {
 			ret = -EINVAL;
 			goto err;
 		}
