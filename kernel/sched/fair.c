@@ -4044,8 +4044,14 @@ static inline void hrtick_update(struct rq *rq)
 }
 #endif
 
+#ifdef CONFIG_SMP
+static bool cpu_overutilized(int cpu);
 static inline unsigned long boosted_cpu_util(int cpu);
+#else
+#define boosted_cpu_util(cpu) cpu_util(cpu, UTIL_EST)
+#endif
 
+#ifdef CONFIG_CPU_FREQ_GOV_SCHED
 static void update_capacity_of(int cpu)
 {
 	unsigned long req_cap;
@@ -4058,8 +4064,7 @@ static void update_capacity_of(int cpu)
 	req_cap = req_cap * SCHED_CAPACITY_SCALE / capacity_orig_of(cpu);
 	set_cfs_cpu_capacity(cpu, true, req_cap);
 }
-
-static bool cpu_overutilized(int cpu);
+#endif
 
 /*
  * The enqueue_task method is called before nr_running is
@@ -4071,8 +4076,10 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
 {
 	struct cfs_rq *cfs_rq;
 	struct sched_entity *se = &p->se;
+#ifdef CONFIG_SMP
 	int task_new = flags & ENQUEUE_WAKEUP_NEW;
 	int task_wakeup = flags & ENQUEUE_WAKEUP;
+#endif
 
 	for_each_sched_entity(se) {
 		if (se->on_rq)
@@ -4106,8 +4113,12 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
 		update_cfs_shares(cfs_rq);
 	}
 
-	if (!se) {
+	if (!se)
 		add_nr_running(rq, 1);
+
+#ifdef CONFIG_SMP
+
+	if (!se) {
 		walt_inc_cumulative_runnable_avg(rq, p);
 		if (!task_new && !rq->rd->overutilized &&
 		    cpu_overutilized(rq->cpu)) {
@@ -4134,6 +4145,8 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
 
 	/* Update SchedTune accouting */
 	schedtune_enqueue_task(p, cpu_of(rq));
+
+#endif /* CONFIG_SMP */
 
 	hrtick_update(rq);
 }
@@ -4194,8 +4207,12 @@ static void dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
 		update_cfs_shares(cfs_rq);
 	}
 
-	if (!se) {
+	if (!se)
 		sub_nr_running(rq, 1);
+
+#ifdef CONFIG_SMP
+
+	if (!se) {
 		walt_dec_cumulative_runnable_avg(rq, p);
 
 		/*
@@ -4230,6 +4247,8 @@ static void dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
 
 	/* Update SchedTune accouting */
 	schedtune_dequeue_task(p, cpu_of(rq));
+
+#endif /* CONFIG_SMP */
 
 	hrtick_update(rq);
 }
@@ -5731,6 +5750,8 @@ static void task_dead_fair(struct task_struct *p)
 {
 	remove_entity_load_avg(&p->se);
 }
+#else
+#define task_fits_max(p, cpu) true
 #endif /* CONFIG_SMP */
 
 static unsigned long
@@ -8813,12 +8834,15 @@ static void task_tick_fair(struct rq *rq, struct task_struct *curr, int queued)
 	if (numabalancing_enabled)
 		task_tick_numa(rq, curr);
 
+#ifdef CONFIG_SMP
 	if (!rq->rd->overutilized && cpu_overutilized(task_cpu(curr))) {
 		rq->rd->overutilized = true;
 		trace_sched_overutilized(true);
 	}
 
 	rq->misfit_task = !task_fits_max(curr, rq->cpu);
+#endif
+
 }
 
 /*
