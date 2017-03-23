@@ -1,4 +1,4 @@
-/************************************************************************************
+/***********************************************************************************
  ** File: - /android/kernel/drivers/input/touchscreen/synaptic_s3320.c
  ** Copyright (C), 2008-2012, OEM Mobile Comm Corp., Ltd
  **
@@ -187,10 +187,14 @@ static int gesture_switch = 0;
 #endif
 
 /*********************for Debug LOG switch*******************/
-// #define DEBUG
-#define TPD_ERR(a, arg...)  pr_err(TPD_DEVICE ": " a, ##arg)
-#define TPDTM_DMESG(a, arg...)  printk(TPD_DEVICE ": " a, ##arg)
-#define TPD_DEBUG(a,arg...)  pr_debug(TPD_DEVICE ": " a,##arg)
+#define TPD_ERR(a, arg...)  pr_debug(TPD_DEVICE ": " a, ##arg)
+#define TPDTM_DMESG(a, arg...)  pr_debug(TPD_DEVICE ": " a, ##arg)
+
+#define TPD_DEBUG(a,arg...)\
+	do{\
+		if(tp_debug)\
+		pr_debug(TPD_DEVICE ": " a,##arg);\
+	}while(0)
 
 /*---------------------------------------------Global Variable----------------------------------------------*/
 static int baseline_ret = 0;
