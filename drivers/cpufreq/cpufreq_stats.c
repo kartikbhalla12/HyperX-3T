@@ -427,11 +427,13 @@ static void cpufreq_stats_update_policy_cpu(struct cpufreq_policy *policy)
 	if (stat) {
 		kfree(stat->time_in_state);
 		kfree(stat);
-	} else {
-		return;
 	}
 
 	stat = per_cpu(cpufreq_stats_table, policy->last_cpu);
+	if (!stat) {
+		return;
+	}
+
 	per_cpu(cpufreq_stats_table, policy->cpu) = per_cpu(cpufreq_stats_table,
 			policy->last_cpu);
 	per_cpu(cpufreq_stats_table, policy->last_cpu) = NULL;
@@ -619,12 +621,6 @@ static int cpufreq_stat_notifier_policy(struct notifier_block *nb,
 	}
 
 	table = cpufreq_frequency_get_table(cpu);
-	if (!table) {
-		if (val == CPUFREQ_REMOVE_POLICY)
-			__cpufreq_stats_free_table(policy);
-		return 0;
-	}
-
 
 	cpufreq_for_each_valid_entry(pos, table)
 		count++;
