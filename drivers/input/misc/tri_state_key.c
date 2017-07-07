@@ -12,6 +12,7 @@
 #include <linux/input.h>
 #include <linux/ioport.h>
 #include <linux/platform_device.h>
+#include <linux/proc_fs.h>
 #include <linux/gpio.h>
 #include <linux/gpio_keys.h>
 #include <linux/of_platform.h>
@@ -30,9 +31,9 @@
 
 /*
 	        KEY1(GPIO1)	KEY2(GPIO92)
-1½ÅºÍ4½ÅÁ¬½Ó	0	            1         | MUTE
-2½ÅºÍ5½ÅÁ¬½Ó	1	            1         | Do Not Disturb
-4½ÅºÍ3½ÅÁ¬½Ó	1	            0         | Normal
+1ï¿½Åºï¿½4ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½	0	            1         | MUTE
+2ï¿½Åºï¿½5ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½	1	            1         | Do Not Disturb
+4ï¿½Åºï¿½3ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½	1	            0         | Normal
 
 */
 #define KEYCODE_BASE 600
@@ -60,7 +61,7 @@ struct switch_dev_data {
 	struct work_struct work;
 	struct switch_dev sdev;
 	struct device *dev;
-	//struct input_dev *input;
+	struct input_dev *input;
 
 	struct timer_list s_timer;
 	struct pinctrl * key_pinctrl;
@@ -70,15 +71,20 @@ struct switch_dev_data {
 
 static struct switch_dev_data *switch_data;
 static DEFINE_MUTEX(sem);
-#if 0
-static int set_gpio_by_pinctrl(void)
+
+static void send_input(int keyCode)
 {
-    printk(KERN_ERR "tristate_key set_gpio_by_pinctrl. \n");
-    return pinctrl_select_state(switch_data->key_pinctrl, switch_data->set_state);
+	input_report_key(switch_data->input, keyCode, 1);
+	input_sync(switch_data->input);
+	input_report_key(switch_data->input, keyCode, 0);
+	input_sync(switch_data->input);
 }
-#endif
+
 static void switch_dev_work(struct work_struct *work)
 {
+	int keyCode;
+	int mode;
+	mutex_lock(&sem);
 
 	if(!gpio_get_value(switch_data->key2_gpio))
 	{
@@ -103,12 +109,11 @@ static void switch_dev_work(struct work_struct *work)
 	}
 	mutex_unlock(&sem);
 }
+
 irqreturn_t switch_dev_interrupt(int irq, void *_dev)
 {
-//printk("%s\n",__func__);
-    schedule_work(&switch_data->work);
-
-		return IRQ_HANDLED;
+	schedule_work(&switch_data->work);
+	return IRQ_HANDLED;
 }
 
 static void timer_handle(unsigned long arg)
@@ -119,7 +124,7 @@ static void timer_handle(unsigned long arg)
     schedule_work(&switch_data->work);
     //del_timer(&switch_data->s_timer);
 
-    //printk(KERN_ERR "tristate_key set gpio77 timer. \n");
+//	printk(KERN_ERR "tristate_key set gpio77 timer. \n");
 }
 
 /* //no need cause switch_class.c state_show()
@@ -421,7 +426,7 @@ const struct file_operations proc_keyCode_bottom =
 static int tristate_dev_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
-
+	struct proc_dir_entry *procdir;
 	int error=0;
 	int i;
 
@@ -594,6 +599,12 @@ static int tristate_dev_probe(struct platform_device *pdev)
 		 //set_gpio_by_pinctrl();
         //report the first switch
         //switch_dev_work(&switch_data->work);
+
+	procdir = proc_mkdir("tri-state-key", NULL);
+	proc_create_data("keyCode_top", 0666, procdir, &proc_keyCode_top, NULL);
+	proc_create_data("keyCode_middle", 0666, procdir, &proc_keyCode_middle, NULL);
+	proc_create_data("keyCode_bottom", 0666, procdir, &proc_keyCode_bottom, NULL);
+
         return 0;
 
 
@@ -607,6 +618,10 @@ err_set_gpio_input:
 	gpio_free(switch_data->key3_gpio);
 err_switch_dev_register:
 	kfree(switch_data);
+err_input_device_register:
+	input_unregister_device(switch_data->input);
+	input_free_device(switch_data->input);
+
 
 	return error;
 }
