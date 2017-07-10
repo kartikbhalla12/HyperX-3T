@@ -1153,40 +1153,12 @@ static const u32 prio_to_wmult[40] = {
  /*  15 */ 119304647, 148102320, 186737708, 238609294, 286331153,
 };
 
-/*
- * {de,en}queue flags:
- *
- * DEQUEUE_SLEEP  - task is no longer runnable
- * ENQUEUE_WAKEUP - task just became runnable
- *
- * SAVE/RESTORE - an otherwise spurious dequeue/enqueue, done to ensure tasks
- *                are in a known state which allows modification. Such pairs
- *                should preserve as much state as possible.
- *
- * MOVE - paired with SAVE/RESTORE, explicitly does not preserve the location
- *        in the runqueue.
- *
- * ENQUEUE_HEAD      - place at front of runqueue (tail if not specified)
- * ENQUEUE_REPLENISH - CBS (replenish runtime and postpone deadline)
- * ENQUEUE_WAKING    - sched_class::task_waking was called
- *
- */
-
-#define DEQUEUE_SLEEP		0x01
-#define DEQUEUE_SAVE		0x02 /* matches ENQUEUE_RESTORE */
-#define DEQUEUE_MOVE		0x04 /* matches ENQUEUE_MOVE */
-#define DEQUEUE_MIGRATING	0x08
-
-#define ENQUEUE_WAKEUP		0x01
-#define ENQUEUE_RESTORE		0x02
-#define ENQUEUE_MOVE		0x04
-
-#define ENQUEUE_HEAD		0x08
-#define ENQUEUE_REPLENISH	0x10
+#define ENQUEUE_WAKEUP		1
+#define ENQUEUE_HEAD		2
 #ifdef CONFIG_SMP
-#define ENQUEUE_MIGRATED	0x20
+#define ENQUEUE_WAKING		4	/* sched_class::task_waking was called */
 #else
-#define ENQUEUE_MIGRATED	0x00
+#define ENQUEUE_WAKING		0
 #endif
 #define ENQUEUE_REPLENISH	0x08
 #define ENQUEUE_RESTORE	0x10
@@ -1223,6 +1195,7 @@ struct sched_class {
 	void (*migrate_task_rq)(struct task_struct *p, int next_cpu);
 
 	void (*post_schedule) (struct rq *this_rq);
+	void (*task_waking) (struct task_struct *task);
 	void (*task_woken) (struct rq *this_rq, struct task_struct *task);
 
 	void (*set_cpus_allowed)(struct task_struct *p,
