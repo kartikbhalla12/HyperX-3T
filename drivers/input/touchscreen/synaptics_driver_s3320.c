@@ -4223,18 +4223,11 @@ static int synaptics_ts_probe(struct i2c_client *client, const struct i2c_device
 	}
 	INIT_DELAYED_WORK(&ts->speed_up_work,speedup_synaptics_resume);
 
-	synaptics_report = create_singlethread_workqueue("synaptics_report");
-	if( !synaptics_report ){
-		ret = -ENOMEM;
-		goto exit_createworkqueue_failed;
-	}
-
 	get_base_report = create_singlethread_workqueue("get_base_report");
 	if( !get_base_report ){
 		ret = -ENOMEM;
 		goto exit_createworkqueue_failed;
 	}
-	INIT_WORK(&ts->report_work,synaptics_ts_work_func);
 	INIT_DELAYED_WORK(&ts->base_work,tp_baseline_get_work);
 
 	ret = synaptics_init_panel(ts); /* will also switch back to page 0x04 */
