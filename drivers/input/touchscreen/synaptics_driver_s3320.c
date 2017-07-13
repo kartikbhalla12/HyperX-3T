@@ -1221,12 +1221,10 @@ static void gesture_judge(struct synaptics_ts_data *ts)
 
 	if (ts->gesture_enable) {
 		gesture_upload = gesture;
-		if (gesture != UnkownGestrue) {
-			input_report_key(ts->input_dev, keyCode, 1);
-			input_sync(ts->input_dev);
-			input_report_key(ts->input_dev, keyCode, 0);
-			input_sync(ts->input_dev);
-		}
+		input_report_key(ts->input_dev, keyCode, 1);
+		input_sync(ts->input_dev);
+		input_report_key(ts->input_dev, keyCode, 0);
+		input_sync(ts->input_dev);
 	} else {
 		ret = i2c_smbus_read_i2c_block_data( ts->client, F12_2D_CTRL20, 3, &(reportbuf[0x0]) );
 		ret = reportbuf[2] & 0x20;
