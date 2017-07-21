@@ -618,6 +618,9 @@ static int cpufreq_stat_notifier_policy(struct notifier_block *nb,
 
 	table = cpufreq_frequency_get_table(cpu);
 
+	if (!table)
+		return 0;
+
 	cpufreq_for_each_valid_entry(pos, table)
 		count++;
 
