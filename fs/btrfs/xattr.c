@@ -111,6 +111,8 @@ static int do_setxattr(struct btrfs_trans_handle *trans,
 					name, name_len, -1);
 		if (!di && (flags & XATTR_REPLACE))
 			ret = -ENODATA;
+		else if (IS_ERR(di))
+			ret = PTR_ERR(di);
 		else if (di)
 			ret = btrfs_delete_one_dir_name(trans, root, path, di);
 		goto out;
@@ -127,10 +129,12 @@ static int do_setxattr(struct btrfs_trans_handle *trans,
 		ASSERT(mutex_is_locked(&inode->i_mutex));
 		di = btrfs_lookup_xattr(NULL, root, path, btrfs_ino(inode),
 					name, name_len, 0);
-		if (!di) {
+		if (!di)
 			ret = -ENODATA;
+		else if (IS_ERR(di))
+			ret = PTR_ERR(di);
+		if (ret)
 			goto out;
-		}
 		btrfs_release_path(path);
 		di = NULL;
 	}
@@ -245,7 +249,7 @@ int __btrfs_setxattr(struct btrfs_trans_handle *trans,
 		goto out;
 
 	inode_inc_iversion(inode);
-	inode->i_ctime = CURRENT_TIME;
+	inode->i_ctime = current_fs_time(inode->i_sb);
 	set_bit(BTRFS_INODE_COPY_EVERYTHING, &BTRFS_I(inode)->runtime_flags);
 	ret = btrfs_update_inode(trans, root, inode);
 	BUG_ON(ret);
@@ -256,16 +260,12 @@ out:
 
 ssize_t btrfs_listxattr(struct dentry *dentry, char *buffer, size_t size)
 {
-	struct btrfs_key key, found_key;
-	struct inode *inode = dentry->d_inode;
+	struct btrfs_key key;
+	struct inode *inode = d_inode(dentry);
 	struct btrfs_root *root = BTRFS_I(inode)->root;
 	struct btrfs_path *path;
-	struct extent_buffer *leaf;
-	struct btrfs_dir_item *di;
-	int ret = 0, slot;
+	int ret = 0;
 	size_t total_size = 0, size_left = size;
-	unsigned long name_ptr;
-	size_t name_len;
 
 	/*
 	 * ok we want all objects associated with this id.
@@ -279,7 +279,7 @@ ssize_t btrfs_listxattr(struct dentry *dentry, char *buffer, size_t size)
 	path = btrfs_alloc_path();
 	if (!path)
 		return -ENOMEM;
-	path->reada = 2;
+	path->reada = READA_FORWARD;
 
 	/* search for our xattrs */
 	ret = btrfs_search_slot(NULL, root, &key, path, 0, 0);
@@ -287,6 +287,13 @@ ssize_t btrfs_listxattr(struct dentry *dentry, char *buffer, size_t size)
 		goto err;
 
 	while (1) {
+		struct extent_buffer *leaf;
+		int slot;
+		struct btrfs_dir_item *di;
+		struct btrfs_key found_key;
+		u32 item_size;
+		u32 cur;
+
 		leaf = path->nodes[0];
 		slot = path->slots[0];
 
@@ -312,31 +319,45 @@ ssize_t btrfs_listxattr(struct dentry *dentry, char *buffer, size_t size)
 		if (found_key.type > BTRFS_XATTR_ITEM_KEY)
 			break;
 		if (found_key.type < BTRFS_XATTR_ITEM_KEY)
-			goto next;
+			goto next_item;
 
 		di = btrfs_item_ptr(leaf, slot, struct btrfs_dir_item);
-		if (verify_dir_item(root, leaf, di))
-			goto next;
+		item_size = btrfs_item_size_nr(leaf, slot);
+		cur = 0;
+		while (cur < item_size) {
+			u16 name_len = btrfs_dir_name_len(leaf, di);
+			u16 data_len = btrfs_dir_data_len(leaf, di);
+			u32 this_len = sizeof(*di) + name_len + data_len;
+			unsigned long name_ptr = (unsigned long)(di + 1);
 
-		name_len = btrfs_dir_name_len(leaf, di);
-		total_size += name_len + 1;
+			if (verify_dir_item(root, leaf, di)) {
+				ret = -EIO;
+				goto err;
+			}
 
-		/* we are just looking for how big our buffer needs to be */
-		if (!size)
-			goto next;
+			total_size += name_len + 1;
+			/*
+			 * We are just looking for how big our buffer needs to
+			 * be.
+			 */
+			if (!size)
+				goto next;
 
-		if (!buffer || (name_len + 1) > size_left) {
-			ret = -ERANGE;
-			goto err;
-		}
+			if (!buffer || (name_len + 1) > size_left) {
+				ret = -ERANGE;
+				goto err;
+			}
 
-		name_ptr = (unsigned long)(di + 1);
-		read_extent_buffer(leaf, buffer, name_ptr, name_len);
-		buffer[name_len] = '\0';
+			read_extent_buffer(leaf, buffer, name_ptr, name_len);
+			buffer[name_len] = '\0';
 
-		size_left -= name_len + 1;
-		buffer += name_len + 1;
+			size_left -= name_len + 1;
+			buffer += name_len + 1;
 next:
+			cur += this_len;
+			di = (struct btrfs_dir_item *)((char *)di + this_len);
+		}
+next_item:
 		path->slots[0]++;
 	}
 	ret = total_size;
@@ -409,13 +430,13 @@ ssize_t btrfs_getxattr(struct dentry *dentry, const char *name,
 	ret = btrfs_is_valid_xattr(name);
 	if (ret)
 		return ret;
-	return __btrfs_getxattr(dentry->d_inode, name, buffer, size);
+	return __btrfs_getxattr(d_inode(dentry), name, buffer, size);
 }
 
 int btrfs_setxattr(struct dentry *dentry, const char *name, const void *value,
 		   size_t size, int flags)
 {
-	struct btrfs_root *root = BTRFS_I(dentry->d_inode)->root;
+	struct btrfs_root *root = BTRFS_I(d_inode(dentry))->root;
 	int ret;
 
 	/*
@@ -438,19 +459,19 @@ int btrfs_setxattr(struct dentry *dentry, const char *name, const void *value,
 		return ret;
 
 	if (!strncmp(name, XATTR_BTRFS_PREFIX, XATTR_BTRFS_PREFIX_LEN))
-		return btrfs_set_prop(dentry->d_inode, name,
+		return btrfs_set_prop(d_inode(dentry), name,
 				      value, size, flags);
 
 	if (size == 0)
 		value = "";  /* empty EA, do not remove */
 
-	return __btrfs_setxattr(NULL, dentry->d_inode, name, value, size,
+	return __btrfs_setxattr(NULL, d_inode(dentry), name, value, size,
 				flags);
 }
 
 int btrfs_removexattr(struct dentry *dentry, const char *name)
 {
-	struct btrfs_root *root = BTRFS_I(dentry->d_inode)->root;
+	struct btrfs_root *root = BTRFS_I(d_inode(dentry))->root;
 	int ret;
 
 	/*
@@ -473,10 +494,10 @@ int btrfs_removexattr(struct dentry *dentry, const char *name)
 		return ret;
 
 	if (!strncmp(name, XATTR_BTRFS_PREFIX, XATTR_BTRFS_PREFIX_LEN))
-		return btrfs_set_prop(dentry->d_inode, name,
+		return btrfs_set_prop(d_inode(dentry), name,
 				      NULL, 0, XATTR_REPLACE);
 
-	return __btrfs_setxattr(NULL, dentry->d_inode, name, NULL, 0,
+	return __btrfs_setxattr(NULL, d_inode(dentry), name, NULL, 0,
 				XATTR_REPLACE);
 }
 
@@ -490,7 +511,7 @@ static int btrfs_initxattrs(struct inode *inode,
 
 	for (xattr = xattr_array; xattr->name != NULL; xattr++) {
 		name = kmalloc(XATTR_SECURITY_PREFIX_LEN +
-			       strlen(xattr->name) + 1, GFP_NOFS);
+			       strlen(xattr->name) + 1, GFP_KERNEL);
 		if (!name) {
 			err = -ENOMEM;
 			break;
