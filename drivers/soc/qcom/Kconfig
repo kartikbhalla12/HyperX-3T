@@ -825,6 +825,13 @@ config QCOM_SMCINVOKE
 	help
 	  Enable SMCInvoke driver which supports capability based secure
 	  communication between QSEE and HLOS.
+	  
+config AUTOSMP
+	bool "Multi-core automatic hotplug support"
+	depends on SMP && HOTPLUG_CPU
+	help
+	  Automatically hotplugs the multiple cpu cores on and off
+	  based on cpu load and suspend state
 
 config STATE_NOTIFIER
 	bool "State Notifier"
