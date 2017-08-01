@@ -2039,6 +2039,9 @@ struct batched_entropy {
 	unsigned int position;
 };
 
+static DEFINE_PER_CPU(__u32 [MD5_DIGEST_WORDS], get_random_int_hash)
+		__aligned(sizeof(unsigned long));
+
 /*
  * Get a random word for internal kernel use only. The quality of the random
  * number is either as good as RDRAND or as good as /dev/urandom, with the
@@ -2089,6 +2092,10 @@ u32 get_random_u32(void)
 	return ret;
 }
 EXPORT_SYMBOL(get_random_u32);
+
+/*
+ * Same as get_random_int(), but returns unsigned long.
+ */
 
 /*
  * randomize_range() returns a start address such that

@@ -348,7 +348,8 @@ static int rfcomm_sock_bind(struct socket *sock, struct sockaddr *addr, int addr
 	memcpy(&sa, addr, len);
 	chan = sa.rc_channel;
 
-	BT_DBG("sk %pK %pMR", sk, &sa.rc_bdaddr);
+
+	BT_DBG("sk %p %pMR", sk, &sa.rc_bdaddr);
 
 	lock_sock(sk);
 
@@ -364,12 +365,13 @@ static int rfcomm_sock_bind(struct socket *sock, struct sockaddr *addr, int addr
 
 	write_lock(&rfcomm_sk_list.lock);
 
-	if (chan && __rfcomm_get_listen_sock_by_addr(chan, &sa.rc_bdaddr)) {
+	if (sa.rc_channel &&
+	    __rfcomm_get_listen_sock_by_addr(sa.rc_channel, &sa.rc_bdaddr)) {
 		err = -EADDRINUSE;
 	} else {
 		/* Save source address */
 		bacpy(&rfcomm_pi(sk)->src, &sa.rc_bdaddr);
-		rfcomm_pi(sk)->channel = chan;
+		rfcomm_pi(sk)->channel = sa.rc_channel;
 		sk->sk_state = BT_BOUND;
 	}
 
