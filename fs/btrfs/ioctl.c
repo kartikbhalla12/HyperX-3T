@@ -5662,8 +5662,6 @@ long btrfs_compat_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	case FS_IOC32_GETVERSION:
 		cmd = FS_IOC_GETVERSION;
 		break;
-	default:
-		return -ENOIOCTLCMD;
 	}
 
 	return btrfs_ioctl(file, cmd, (unsigned long) compat_ptr(arg));
