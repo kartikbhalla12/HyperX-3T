@@ -254,7 +254,6 @@ static void set_sampling_rate(struct dbs_data *dbs_data,
 	} else if (dbs_data->cdata->governor == GOV_ELEMENTALX) {
 		struct ex_dbs_tuners *ex_tuners = dbs_data->tuners;
 		ex_tuners->sampling_rate = sampling_rate;
-			sampling_rate);
 	} else {
 		struct od_dbs_tuners *od_tuners = dbs_data->tuners;
 		od_tuners->sampling_rate = max(od_tuners->sampling_rate, 
