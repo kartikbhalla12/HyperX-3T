@@ -103,3 +103,4 @@ obj-$(CONFIG_MSM_REMOTEQDSS) += remoteqdss.o
 obj-$(CONFIG_QCOM_SMCINVOKE) += smcinvoke.o
 obj-$(CONFIG_STATE_NOTIFIER) += state_notifier.o
 obj-$(CONFIG_AUTOSMP)			+= autosmp.o
+obj-$(CONFIG_ALUCARD_HOTPLUG) += alucard_hotplug.o
