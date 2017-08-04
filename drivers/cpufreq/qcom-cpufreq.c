@@ -33,6 +33,7 @@
 // AP: Default startup frequencies
 #define CONFIG_CPU_FREQ_MIN_CLUSTER1	307200
 #define CONFIG_CPU_FREQ_MAX_CLUSTER1	1593600
+#define CONFIG_CPU_FREQ_MAX_CLUSTER1PRO 2188000
 #define CONFIG_CPU_FREQ_MIN_CLUSTER2	307200
 #define CONFIG_CPU_FREQ_MAX_CLUSTER2	2150400
 #define CONFIG_CPU_FREQ_MAX_CLUSTER2PRO	2342400
@@ -164,7 +165,10 @@ static int msm_cpufreq_init(struct cpufreq_policy *policy)
 		if (policy->cpu <= 1)
 		{
 			policy->cpuinfo.min_freq = CONFIG_CPU_FREQ_MIN_CLUSTER1;
-			policy->cpuinfo.max_freq = CONFIG_CPU_FREQ_MAX_CLUSTER1;
+			 if (socinfo_get_id() == 305)
+                                policy->cpuinfo.max_freq = CONFIG_CPU_FREQ_MAX_CLUSTER1PRO;
+                        else
+                                policy->cpuinfo.max_freq = CONFIG_CPU_FREQ_MAX_CLUSTER1;
 		}
 
 		if (policy->cpu >= 2)
@@ -183,7 +187,10 @@ static int msm_cpufreq_init(struct cpufreq_policy *policy)
 	if (policy->cpu <= 1)
 	{
 		policy->min = CONFIG_CPU_FREQ_MIN_CLUSTER1;
-		policy->max = CONFIG_CPU_FREQ_MAX_CLUSTER1;
+		if (socinfo_get_id() == 305)
+                        policy->max = CONFIG_CPU_FREQ_MAX_CLUSTER1PRO;
+                else
+                        policy->max = CONFIG_CPU_FREQ_MAX_CLUSTER1;
 	}
 
 	if (policy->cpu >= 2)
