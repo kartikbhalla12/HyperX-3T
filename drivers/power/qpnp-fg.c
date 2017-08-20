@@ -1568,7 +1568,8 @@ static int __fg_interleaved_mem_write(struct fg_chip *chip, u8 *val,
 
 		rc = fg_check_iacs_ready(chip);
 		if (rc) {
-			pr_debug("IACS_RDY failed rc=%d\n", rc);
+			pr_err("IACS_RDY failed post write to address %x offset %d rc=%d\n",
+				address, offset, rc);
 			return rc;
 		}
 
@@ -1614,7 +1615,8 @@ static int __fg_interleaved_mem_read(struct fg_chip *chip, u8 *val, u16 address,
 
 		rc = fg_check_iacs_ready(chip);
 		if (rc) {
-			pr_debug("IACS_RDY failed rc=%d\n", rc);
+			pr_err("IACS_RDY failed post read for address %x offset %d rc=%d\n",
+				address, offset, rc);
 			return rc;
 		}
 
@@ -1697,7 +1699,8 @@ static int fg_interleaved_mem_config(struct fg_chip *chip, u8 *val,
 
 	rc = fg_check_iacs_ready(chip);
 	if (rc) {
-		pr_debug("IACS_RDY failed rc=%d\n", rc);
+		pr_err("IACS_RDY failed before setting address: %x offset: %d rc=%d\n",
+			address, offset, rc);
 		return rc;
 	}
 
@@ -1710,7 +1713,8 @@ static int fg_interleaved_mem_config(struct fg_chip *chip, u8 *val,
 
 	rc = fg_check_iacs_ready(chip);
 	if (rc)
-		pr_debug("IACS_RDY failed rc=%d\n", rc);
+		pr_err("IACS_RDY failed after setting address: %x offset: %d rc=%d\n",
+			address, offset, rc);
 
 	return rc;
 }
@@ -1721,7 +1725,7 @@ static int fg_interleaved_mem_config(struct fg_chip *chip, u8 *val,
 static int fg_interleaved_mem_read(struct fg_chip *chip, u8 *val, u16 address,
 						int len, int offset)
 {
-	int rc = 0, orig_address = address;
+	int rc = 0, ret, orig_address = address;
 	u8 start_beat_count, end_beat_count, count = 0;
 	bool retry = false;
 
@@ -1802,9 +1806,14 @@ retry:
 	}
 out:
 	/* Release IMA access */
-	rc = fg_masked_write(chip, MEM_INTF_CFG(chip), IMA_REQ_ACCESS, 0, 1);
-	if (rc)
-		pr_err("failed to reset IMA access bit rc = %d\n", rc);
+	ret = fg_masked_write(chip, MEM_INTF_CFG(chip), IMA_REQ_ACCESS, 0, 1);
+	if (ret)
+		pr_err("failed to reset IMA access bit ret = %d\n", ret);
+
+	if (rc) {
+		mutex_unlock(&chip->rw_lock);
+		goto exit;
+	}
 
 	if (retry) {
 		retry = false;
@@ -1820,7 +1829,7 @@ exit:
 static int fg_interleaved_mem_write(struct fg_chip *chip, u8 *val, u16 address,
 							int len, int offset)
 {
-	int rc = 0, orig_address = address;
+	int rc = 0, ret, orig_address = address;
 	u8 count = 0;
 
 	if (chip->fg_shutdown)
@@ -1865,9 +1874,9 @@ retry:
 
 out:
 	/* Release IMA access */
-	rc = fg_masked_write(chip, MEM_INTF_CFG(chip), IMA_REQ_ACCESS, 0, 1);
-	if (rc)
-		pr_err("failed to reset IMA access bit rc = %d\n", rc);
+	ret = fg_masked_write(chip, MEM_INTF_CFG(chip), IMA_REQ_ACCESS, 0, 1);
+	if (ret)
+		pr_err("failed to reset IMA access bit ret = %d\n", ret);
 
 	mutex_unlock(&chip->rw_lock);
 	fg_relax(&chip->memif_wakeup_source);
@@ -2625,6 +2634,61 @@ out:
 	return rc;
 }
 
+// Read the beat count and write it into the beat_count arg;
+// return non-zero on failure.
+static int read_beat(struct fg_chip *chip, u8 *beat_count)
+{
+	int rc = fg_read(chip, beat_count,
+			 chip->mem_base + MEM_INTF_FG_BEAT_COUNT, 1);
+	if (rc)
+		pr_err("failed to read beat count rc=%d\n", rc);
+	else if (fg_debug_mask & FG_STATUS)
+		pr_info("current: %d, prev: %d\n", *beat_count,
+			chip->last_beat_count);
+	return rc;
+}
+
+/*
+ * The FG_ALG_SYSCTL_1 word contains control bits for the
+ * fuel-gauge algorithm, most of whose effect are not
+ * publicly disclosed. The low nibble of 0x4B3 contains
+ * bits to control whether an IRQ is raised on low-battery
+ * conditions, as well as a debug bit (bit 3) that forces
+ * a delta-soc interrupt on every fuel-gauge cycle.
+ * The value in FG_ALG_SYSCTL_1_DFLT is the recommended
+ * default configuration with the IRQ's enabled.
+ */
+#define FG_ALG_SYSCTL_1		0x4B0
+#define FG_ALG_SYSCTL_1_DFLT	0x870C7999
+static int fg_check_system_config(struct fg_chip *chip)
+{
+	int rc;
+	u32 buf;
+
+	if (!chip->ima_supported)
+		return 0;
+
+	rc = fg_mem_read(chip, (u8 *)&buf, FG_ALG_SYSCTL_1, 4, 0, 0);
+	if (rc) {
+		pr_err("Failed to read 0x4B0-3 rc=%d\n", rc);
+		return rc;
+	}
+
+	if (fg_debug_mask & FG_STATUS)
+		pr_info("FG_ALG_SYSCTL_1: %x\n", buf);
+	if (buf != FG_ALG_SYSCTL_1_DFLT) {
+		pr_err("FG_ALG_SYSCTL_1 corrupted? buf: %x\n", buf);
+		buf = FG_ALG_SYSCTL_1_DFLT;
+		rc = fg_mem_write(chip, (u8 *)&buf, FG_ALG_SYSCTL_1, 4, 0, 0);
+		if (rc) {
+			pr_err("Failed to write 0x4B0-3 rc=%d\n", rc);
+			return rc;
+		}
+	}
+
+	return rc;
+}
+
 #define SANITY_CHECK_PERIOD_MS	5000
 static void check_sanity_work(struct work_struct *work)
 {
@@ -2635,19 +2699,28 @@ static void check_sanity_work(struct work_struct *work)
 	u8 beat_count;
 	bool tried_once = false;
 
+	rc = fg_check_system_config(chip);
+	if (rc)
+		pr_err("Failed to check system config rc=%d\n", rc);
+
+	// Try one beat check once up-front to avoid the common
+	// case where the beat has changed and we don't need to hold
+	// the chip awake.
+	rc = read_beat(chip, &beat_count);
+	if (rc == 0 && chip->last_beat_count != beat_count) {
+		chip->last_beat_count = beat_count;
+		schedule_delayed_work(
+			&chip->check_sanity_work,
+			msecs_to_jiffies(SANITY_CHECK_PERIOD_MS));
+		return;
+	}
+
 	fg_stay_awake(&chip->sanity_wakeup_source);
 
 try_again:
-	rc = fg_read(chip, &beat_count,
-			chip->mem_base + MEM_INTF_FG_BEAT_COUNT, 1);
-	if (rc) {
-		pr_err("failed to read beat count rc=%d\n", rc);
+	rc = read_beat(chip, &beat_count);
+	if (rc)
 		goto resched;
-	}
-
-	if (fg_debug_mask & FG_STATUS)
-		pr_info("current: %d, prev: %d\n", beat_count,
-			chip->last_beat_count);
 
 	if (chip->last_beat_count == beat_count) {
 		if (!tried_once) {
@@ -3508,6 +3581,7 @@ static int fg_cap_learning_process_full_data(struct fg_chip *chip)
 	int cc_pc_val, rc = -EINVAL;
 	unsigned int cc_soc_delta_pc;
 	int64_t delta_cc_uah;
+	uint64_t temp;
 	bool batt_missing = is_battery_missing(chip);
 
 	if (batt_missing) {
@@ -3530,9 +3604,8 @@ static int fg_cap_learning_process_full_data(struct fg_chip *chip)
 		goto fail;
 	}
 
-	cc_soc_delta_pc = DIV_ROUND_CLOSEST(
-			abs(cc_pc_val - chip->learning_data.init_cc_pc_val)
-			* 100, FULL_PERCENT_28BIT);
+	temp = abs(cc_pc_val - chip->learning_data.init_cc_pc_val);
+	cc_soc_delta_pc = DIV_ROUND_CLOSEST_ULL(temp * 100, FULL_PERCENT_28BIT);
 
 	delta_cc_uah = div64_s64(
 			chip->learning_data.learned_cc_uah * cc_soc_delta_pc,
@@ -3540,8 +3613,11 @@ static int fg_cap_learning_process_full_data(struct fg_chip *chip)
 	chip->learning_data.cc_uah = delta_cc_uah + chip->learning_data.cc_uah;
 
 	if (fg_debug_mask & FG_AGING)
-		pr_info("current cc_soc=%d cc_soc_pc=%d total_cc_uah = %lld\n",
+		pr_info("current cc_soc=%d cc_soc_pc=%d init_cc_pc_val=%d delta_cc_uah=%lld learned_cc_uah=%lld total_cc_uah = %lld\n",
 				cc_pc_val, cc_soc_delta_pc,
+				chip->learning_data.init_cc_pc_val,
+				delta_cc_uah,
+				chip->learning_data.learned_cc_uah,
 				chip->learning_data.cc_uah);
 
 	return 0;
@@ -4066,10 +4142,10 @@ static void status_change_work(struct work_struct *work)
 	}
 	if ((chip->wa_flag & USE_CC_SOC_REG) && chip->bad_batt_detection_en
 			&& chip->safety_timer_expired) {
-		chip->sw_cc_soc_data.delta_soc =
-			DIV_ROUND_CLOSEST(abs(cc_soc -
-					chip->sw_cc_soc_data.init_cc_soc)
-					* 100, FULL_PERCENT_28BIT);
+		uint64_t delta_cc_soc = abs(cc_soc -
+					chip->sw_cc_soc_data.init_cc_soc);
+		chip->sw_cc_soc_data.delta_soc = DIV_ROUND_CLOSEST_ULL(
+				delta_cc_soc * 100, FULL_PERCENT_28BIT);
 		chip->sw_cc_soc_data.full_capacity =
 			chip->sw_cc_soc_data.delta_soc +
 			chip->sw_cc_soc_data.init_sys_soc;
@@ -5338,6 +5414,10 @@ static irqreturn_t fg_soc_irq_handler(int irq, void *_chip)
 	if (fg_debug_mask & FG_IRQS)
 		pr_info("triggered 0x%x\n", soc_rt_sts);
 
+	rc = fg_check_system_config(chip);
+	if (rc)
+		pr_err("Failed to check system config rc=%d\n", rc);
+
 	if (chip->dischg_gain.enable) {
 		fg_stay_awake(&chip->dischg_gain_wakeup_source);
 		schedule_work(&chip->dischg_gain_work);
@@ -5457,17 +5537,18 @@ static irqreturn_t fg_first_soc_irq_handler(int irq, void *_chip)
 static void fg_external_power_changed(struct power_supply *psy)
 {
 	struct fg_chip *chip = container_of(psy, struct fg_chip, bms_psy);
+	bool input_present = is_input_present(chip);
 
-	if (is_input_present(chip) && chip->rslow_comp.active &&
+	if (input_present ^ chip->rslow_comp.active &&
 			chip->rslow_comp.chg_rs_to_rslow > 0 &&
 			chip->rslow_comp.chg_rslow_comp_c1 > 0 &&
 			chip->rslow_comp.chg_rslow_comp_c2 > 0)
 		schedule_work(&chip->rslow_comp_work);
-	if (!is_input_present(chip) && chip->resume_soc_lowered) {
+	if (!input_present && chip->resume_soc_lowered) {
 		fg_stay_awake(&chip->resume_soc_wakeup_source);
 		schedule_work(&chip->set_resume_soc_work);
 	}
-	if (!is_input_present(chip) && chip->charge_full)
+	if (!input_present && chip->charge_full)
 		schedule_work(&chip->charge_full_work);
 }
 
@@ -5532,6 +5613,25 @@ done:
 #define RSLOW_COMP_REG			0x528
 #define RSLOW_COMP_C1_OFFSET		0
 #define RSLOW_COMP_C2_OFFSET		2
+#define BATT_PROFILE_OFFSET		0x4C0
+static void get_default_rslow_comp_settings(struct fg_chip *chip)
+{
+	int offset;
+
+	offset = RSLOW_CFG_REG + RSLOW_CFG_OFFSET - BATT_PROFILE_OFFSET;
+	memcpy(&chip->rslow_comp.rslow_cfg, chip->batt_profile + offset, 1);
+
+	offset = RSLOW_THRESH_REG + RSLOW_THRESH_OFFSET - BATT_PROFILE_OFFSET;
+	memcpy(&chip->rslow_comp.rslow_thr, chip->batt_profile + offset, 1);
+
+	offset = TEMP_RS_TO_RSLOW_REG + RS_TO_RSLOW_CHG_OFFSET -
+		BATT_PROFILE_OFFSET;
+	memcpy(&chip->rslow_comp.rs_to_rslow, chip->batt_profile + offset, 2);
+
+	offset = RSLOW_COMP_REG + RSLOW_COMP_C1_OFFSET - BATT_PROFILE_OFFSET;
+	memcpy(&chip->rslow_comp.rslow_comp, chip->batt_profile + offset, 4);
+}
+
 static int populate_system_data(struct fg_chip *chip)
 {
 	u8 buffer[24];
@@ -5584,37 +5684,7 @@ static int populate_system_data(struct fg_chip *chip)
 				chip->ocv_junction_p1p2,
 				chip->ocv_junction_p2p3);
 
-	rc = fg_mem_read(chip, buffer, RSLOW_CFG_REG, 1, RSLOW_CFG_OFFSET, 0);
-	if (rc) {
-		pr_err("unable to read rslow cfg: %d\n", rc);
-		goto done;
-	}
-
-	chip->rslow_comp.rslow_cfg = buffer[0];
-	rc = fg_mem_read(chip, buffer, RSLOW_THRESH_REG, 1,
-			RSLOW_THRESH_OFFSET, 0);
-	if (rc) {
-		pr_err("unable to read rslow thresh: %d\n", rc);
-		goto done;
-	}
-
-	chip->rslow_comp.rslow_thr = buffer[0];
-	rc = fg_mem_read(chip, buffer, TEMP_RS_TO_RSLOW_REG, 2,
-			RS_TO_RSLOW_CHG_OFFSET, 0);
-	if (rc) {
-		pr_err("unable to read rs to rslow_chg: %d\n", rc);
-		goto done;
-	}
-
-	memcpy(chip->rslow_comp.rs_to_rslow, buffer, 2);
-	rc = fg_mem_read(chip, buffer, RSLOW_COMP_REG, 4,
-			RSLOW_COMP_C1_OFFSET, 0);
-	if (rc) {
-		pr_err("unable to read rslow comp: %d\n", rc);
-		goto done;
-	}
-
-	memcpy(chip->rslow_comp.rslow_comp, buffer, 4);
+	get_default_rslow_comp_settings(chip);
 done:
 	fg_mem_release(chip);
 	return rc;
@@ -6108,7 +6178,6 @@ static int get_prop_batt_protect_status(struct fg_chip *chip)
 }
 
 #define LOW_LATENCY			BIT(6)
-#define BATT_PROFILE_OFFSET		0x4C0
 #define PROFILE_INTEGRITY_REG		0x53C
 #define PROFILE_INTEGRITY_BIT		BIT(0)
 #define FIRST_EST_DONE_BIT		BIT(5)
@@ -6534,6 +6603,12 @@ wait:
 				pr_info("Battery profiles same, using default\n");
 			if (fg_est_dump)
 				schedule_work(&chip->dump_sram);
+			/*
+			 * Copy the profile read from device tree for
+			 * getting profile parameters later.
+			 */
+			memcpy(chip->batt_profile, data, len);
+			chip->batt_profile_len = len;
 			goto done;
 		}
 	} else {
@@ -7351,9 +7426,10 @@ static int fg_init_irqs(struct fg_chip *chip)
 				}
 			}
 
-			rc = devm_request_irq(chip->dev,
-				chip->soc_irq[DELTA_SOC].irq,
-				fg_soc_irq_handler, IRQF_TRIGGER_RISING,
+			rc = devm_request_threaded_irq(chip->dev,
+				chip->soc_irq[DELTA_SOC].irq, NULL,
+				fg_soc_irq_handler,
+				IRQF_TRIGGER_RISING | IRQF_ONESHOT,
 				"delta-soc", chip);
 			if (rc < 0) {
 				pr_err("Can't request %d delta-soc: %d\n",
@@ -8034,7 +8110,6 @@ static int bcl_trim_workaround(struct fg_chip *chip)
 	return 0;
 }
 
-#define FG_ALG_SYSCTL_1			0x4B0
 #define KI_COEFF_PRED_FULL_ADDR		0x408
 #define TEMP_FRAC_SHIFT_REG		0x4A4
 #define FG_ADC_CONFIG_REG		0x4B8
@@ -8181,6 +8256,12 @@ static int fg_common_hw_init(struct fg_chip *chip)
 	if (fg_debug_mask & FG_STATUS)
 		pr_info("rslow_comp active is %sabled\n",
 			chip->rslow_comp.active ? "en" : "dis");
+
+	rc = fg_check_system_config(chip);
+	if (rc) {
+		pr_err("Failed to check system config rc=%d\n", rc);
+		return rc;
+	}
 
 	/*
 	 * Clear bits 0-2 in 0x4B3 and set them again to make empty_soc irq
@@ -9080,6 +9161,8 @@ static void fg_shutdown(struct spmi_device *spmi)
 
 	if (fg_debug_mask & FG_STATUS)
 		pr_emerg("FG shutdown started\n");
+	if (chip->rslow_comp.active)
+		fg_rslow_charge_comp_clear(chip);
 	fg_cancel_all_works(chip);
 	fg_check_ima_idle(chip);
 	chip->fg_shutdown = true;
