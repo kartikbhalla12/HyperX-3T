@@ -85,9 +85,7 @@ struct lpm_debug {
 
 struct lpm_cluster *lpm_root_node;
 
-#define MAXSAMPLES 5
-
-static bool lpm_prediction = true;
+static bool lpm_prediction;
 module_param_named(lpm_prediction,
 	lpm_prediction, bool, S_IRUGO | S_IWUSR | S_IWGRP);
 
