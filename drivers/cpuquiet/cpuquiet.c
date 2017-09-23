@@ -348,8 +348,7 @@ static int __init cpuquiet_probe(struct platform_device *pdev)
 		goto remove_min;
 	}
 
-	cpuquiet_nr_max_cpus = pm_qos_request(PM_QOS_MAX_ONLINE_CPUS) ? :
-							num_present_cpus();
+	cpuquiet_nr_max_cpus = num_present_cpus();
 	cpuquiet_nr_min_cpus = pm_qos_request(PM_QOS_MIN_ONLINE_CPUS);
 
 	err = cpuquiet_register_devices();
